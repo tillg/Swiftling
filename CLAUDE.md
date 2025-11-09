@@ -106,4 +106,4 @@ Consider using a shared `DocumentationSource` protocol for common search/fetch p
 
 ## Current Status
 
-Project is in initial planning/setup phase with basic SwiftUI app structure. The detailed architecture document (SEARCHER.md) outlines the complete implementation plan for the search-and-retrieval system.
+Project is in initial planning/setup phase with basic SwiftUI app structure. The detailed architecture document (KNOWLEDGERETRIEVER.md) outlines the complete implementation plan for the KnowledgeRetriever search-and-retrieval system.

@@ -1,0 +1,419 @@
+# KnowledgeRetriever Architecture
+
+## Overview
+
+KnowledgeRetriever is a search-and-retrieval component that runs entirely on-device (iOS/macOS) to provide AI-ready documentation content. The system will mimic sosumi.ai’s functionality – converting sites like Apple Developer Docs into Markdown – but operate locally for privacy. It will be implemented in Swift (Swift 6) and integrated with Apple’s new Foundation Models framework as a custom Tool. The solution comprises:
+
+* **Search Module**: Queries a site’s built-in search API with the user’s question (no pre-crawling).
+* **Content Fetch & Conversion**: Fetches the top relevant page (as JSON/HTML) and converts it to clean Markdown or text (removing JS/UI noise).
+* **Foundation Model Tool Integration**: Encapsulates search & retrieval in a Swift class conforming to Apple’s Tool protocol, so the on-device LLM can call it for up-to-date info.
+* **Non-blocking Execution**: Uses asynchronous Swift concurrency (async/await) so UI (SwiftUI app) remains responsive.
+
+This design ensures privacy by design (the LLM and tool run locally; only direct queries to target sites are made) and leverages the performance of Apple's on-device models. Performance is primarily bound by network calls to documentation sites, so the architecture pipelines requests efficiently without blocking the main thread.
+
+## Technical API Specification
+
+### Core Protocol
+
+The `KnowledgeRetriever` protocol defines the contract for all documentation source implementations:
+
+```swift
+/// Core protocol for retrieving knowledge from documentation sources
+protocol KnowledgeRetriever: Sendable {
+    /// Unique identifier for this retriever (e.g., "apple-docs", "github")
+    var sourceIdentifier: String { get }
+
+    /// Human-readable name for this source
+    var sourceName: String { get }
+
+    /// Search for documentation matching the query
+    /// - Parameter query: The search query string
+    /// - Returns: Array of search results, ordered by relevance
+    /// - Throws: `KnowledgeRetrieverError` on failure
+    func search(query: String) async throws -> [SearchResult]
+
+    /// Fetch and convert a specific document to Markdown
+    /// - Parameter result: The search result to fetch
+    /// - Returns: Document content in Markdown format
+    /// - Throws: `KnowledgeRetrieverError` on failure
+    func fetch(_ result: SearchResult) async throws -> DocumentContent
+
+    /// Convenience method: search and fetch the top result
+    /// - Parameter query: The search query string
+    /// - Returns: Document content in Markdown format, or nil if no results
+    /// - Throws: `KnowledgeRetrieverError` on failure
+    func searchAndFetch(query: String) async throws -> DocumentContent?
+}
+
+/// Default implementation for searchAndFetch
+extension KnowledgeRetriever {
+    func searchAndFetch(query: String) async throws -> DocumentContent? {
+        let results = try await search(query: query)
+        guard let topResult = results.first else {
+            return nil
+        }
+        return try await fetch(topResult)
+    }
+}
+```
+
+### Data Models
+
+```swift
+/// Represents a single search result from a documentation source
+struct SearchResult: Sendable, Identifiable {
+    /// Unique identifier for this result
+    let id: UUID
+
+    /// The title of the documentation page
+    let title: String
+
+    /// Brief description or summary
+    let summary: String?
+
+    /// URL to the documentation page
+    let url: URL
+
+    /// Source identifier (matches KnowledgeRetriever.sourceIdentifier)
+    let sourceIdentifier: String
+
+    /// Relevance score (0.0 to 1.0), if available
+    let relevanceScore: Double?
+
+    /// Additional metadata (e.g., API type, language, version)
+    let metadata: [String: String]
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        summary: String? = nil,
+        url: URL,
+        sourceIdentifier: String,
+        relevanceScore: Double? = nil,
+        metadata: [String: String] = [:]
+    ) {
+        self.id = id
+        self.title = title
+        self.summary = summary
+        self.url = url
+        self.sourceIdentifier = sourceIdentifier
+        self.relevanceScore = relevanceScore
+        self.metadata = metadata
+    }
+}
+
+/// Represents fetched and processed documentation content
+struct DocumentContent: Sendable {
+    /// The search result this content corresponds to
+    let searchResult: SearchResult
+
+    /// The document content in Markdown format
+    let markdown: String
+
+    /// Original fetch timestamp
+    let fetchedAt: Date
+
+    /// Optional raw data (for caching/debugging)
+    let rawData: Data?
+
+    init(
+        searchResult: SearchResult,
+        markdown: String,
+        fetchedAt: Date = Date(),
+        rawData: Data? = nil
+    ) {
+        self.searchResult = searchResult
+        self.markdown = markdown
+        self.fetchedAt = fetchedAt
+        self.rawData = rawData
+    }
+}
+```
+
+### Error Handling
+
+```swift
+/// Errors that can occur during knowledge retrieval
+enum KnowledgeRetrieverError: Error, LocalizedError {
+    /// Network request failed
+    case networkError(underlying: Error)
+
+    /// The search returned no results
+    case noResults
+
+    /// Failed to parse the response
+    case parsingError(description: String)
+
+    /// The requested resource was not found (404)
+    case notFound(url: URL)
+
+    /// Rate limit exceeded
+    case rateLimitExceeded(retryAfter: TimeInterval?)
+
+    /// Authentication or authorization failed
+    case authenticationFailed
+
+    /// Invalid query or parameters
+    case invalidRequest(description: String)
+
+    /// Generic error with description
+    case unknownError(description: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .networkError(let error):
+            return "Network error: \(error.localizedDescription)"
+        case .noResults:
+            return "No results found for the query"
+        case .parsingError(let description):
+            return "Failed to parse response: \(description)"
+        case .notFound(let url):
+            return "Resource not found: \(url.absoluteString)"
+        case .rateLimitExceeded(let retryAfter):
+            if let retryAfter = retryAfter {
+                return "Rate limit exceeded. Retry after \(retryAfter) seconds"
+            }
+            return "Rate limit exceeded"
+        case .authenticationFailed:
+            return "Authentication failed"
+        case .invalidRequest(let description):
+            return "Invalid request: \(description)"
+        case .unknownError(let description):
+            return "Unknown error: \(description)"
+        }
+    }
+}
+```
+
+### Caching Support
+
+```swift
+/// Protocol for caching retrieved documentation
+protocol KnowledgeCache: Sendable {
+    /// Retrieve cached content for a URL
+    func get(url: URL) async -> DocumentContent?
+
+    /// Store content in cache
+    func set(_ content: DocumentContent, for url: URL) async
+
+    /// Clear the entire cache
+    func clear() async
+
+    /// Remove expired entries
+    func removeExpired() async
+}
+
+/// Simple in-memory cache implementation
+actor InMemoryKnowledgeCache: KnowledgeCache {
+    private var storage: [URL: CachedEntry] = [:]
+    private let maxAge: TimeInterval
+
+    struct CachedEntry {
+        let content: DocumentContent
+        let cachedAt: Date
+    }
+
+    init(maxAge: TimeInterval = 3600) { // 1 hour default
+        self.maxAge = maxAge
+    }
+
+    func get(url: URL) async -> DocumentContent? {
+        guard let entry = storage[url] else { return nil }
+
+        // Check if expired
+        if Date().timeIntervalSince(entry.cachedAt) > maxAge {
+            storage.removeValue(forKey: url)
+            return nil
+        }
+
+        return entry.content
+    }
+
+    func set(_ content: DocumentContent, for url: URL) async {
+        storage[url] = CachedEntry(content: content, cachedAt: Date())
+    }
+
+    func clear() async {
+        storage.removeAll()
+    }
+
+    func removeExpired() async {
+        let now = Date()
+        storage = storage.filter { _, entry in
+            now.timeIntervalSince(entry.cachedAt) <= maxAge
+        }
+    }
+}
+```
+
+### Concrete Implementation Example: Apple Docs
+
+```swift
+/// KnowledgeRetriever implementation for Apple Developer Documentation
+final class AppleDocsRetriever: KnowledgeRetriever {
+    let sourceIdentifier = "apple-docs"
+    let sourceName = "Apple Developer Documentation"
+
+    private let urlSession: URLSession
+    private let cache: KnowledgeCache?
+
+    init(urlSession: URLSession = .shared, cache: KnowledgeCache? = nil) {
+        self.urlSession = urlSession
+        self.cache = cache
+    }
+
+    func search(query: String) async throws -> [SearchResult] {
+        // Implementation: Query Apple's search API
+        let searchURL = buildSearchURL(query: query)
+        let (data, response) = try await urlSession.data(from: searchURL)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw KnowledgeRetrieverError.unknownError(description: "Invalid response")
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            if httpResponse.statusCode == 404 {
+                throw KnowledgeRetrieverError.noResults
+            }
+            throw KnowledgeRetrieverError.networkError(
+                underlying: URLError(.badServerResponse)
+            )
+        }
+
+        return try parseSearchResults(data)
+    }
+
+    func fetch(_ result: SearchResult) async throws -> DocumentContent {
+        // Check cache first
+        if let cached = await cache?.get(url: result.url) {
+            return cached
+        }
+
+        // Fetch from Apple's JSON endpoint
+        let jsonURL = convertToJSONEndpoint(result.url)
+        let (data, _) = try await urlSession.data(from: jsonURL)
+
+        let markdown = try convertAppleJSONToMarkdown(data)
+        let content = DocumentContent(
+            searchResult: result,
+            markdown: markdown,
+            rawData: data
+        )
+
+        // Cache the result
+        await cache?.set(content, for: result.url)
+
+        return content
+    }
+
+    // MARK: - Private Helpers
+
+    private func buildSearchURL(query: String) -> URL {
+        // Build Apple's search API URL
+        var components = URLComponents(string: "https://developer.apple.com/search/")!
+        components.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "type", value: "documentation")
+        ]
+        return components.url!
+    }
+
+    private func parseSearchResults(_ data: Data) throws -> [SearchResult] {
+        // Parse Apple's search response JSON
+        // Implementation details...
+        []
+    }
+
+    private func convertToJSONEndpoint(_ url: URL) -> URL {
+        // Convert web URL to JSON data endpoint
+        // e.g., https://developer.apple.com/documentation/swift/double
+        // becomes https://developer.apple.com/tutorials/data/documentation/swift/double.json
+        url
+    }
+
+    private func convertAppleJSONToMarkdown(_ data: Data) throws -> String {
+        // Parse JSON and convert to Markdown
+        // Implementation details...
+        ""
+    }
+}
+```
+
+
+## Search and Retrieval Pipeline
+
+1. User Query -> Site Search: When a user (or the LLM) asks a question, we send the query to the target site’s search endpoint. For example, with Apple Developer Docs, we utilize their search functionality (mimicking a user’s search on developer.apple.com). No entire-site crawl is performed – we rely on the site’s own search index to find relevant pages ￼. This approach stays within ToS and gets live results rather than a stale offline index ￼.
+
+2. Top Results Processing: The search returns a list of relevant page links (e.g. documentation articles or code reference pages). We typically take the top result (or top N) for fetching. The system could present these to the LLM or user for selection, but in an autonomous Tool context the LLM might automatically choose the most relevant result. Each result contains a URL or identifier for the content.
+
+3. Fetch Document Content: The tool fetches the page content by accessing the site’s structured data if available. Many modern docs (like Apple’s) serve content via JSON behind the scenes. Indeed, Apple’s docs “are actually available as structured data”, and sosumi.ai maps the normal URL to an underlying JSON endpoint ￼. Our tool will do the same – e.g. for an Apple Doc URL, retrieve the hidden JSON or API that returns the content (ensuring any required authentication or headers are handled). If a structured format isn’t available, the tool can fetch the HTML and then parse or strip it.
+
+4. Convert to Markdown/Text: The raw content is converted into a Markdown format suitable for LLM consumption. Sosumi demonstrated that converting Apple’s JS-rendered docs into static Markdown greatly improves AI readability ￼. We’ll perform a similar conversion: stripping scripts/boilerplate, formatting code blocks and headings in Markdown, etc. This yields a clean, “AI-readable” Markdown version of the answer source (essentially a distilled page). For code repositories or other sites, we similarly extract just the relevant snippet or file content (for example, retrieving a README or a code file from GitHub).
+
+5. Return Results: The processed Markdown/text is returned as the Tool’s output. At this stage, the content can either be shown to the user (for browsing) or passed into the Foundation Model’s context for answer generation. In an automated QA flow, the LLM will take the Markdown content as supporting text to formulate its answer. The signal-to-noise ratio is high after conversion, maximizing the likelihood the model finds the right info ￼.
+
+## Apple Documentation as Markdown (Sosumi-Like Approach)
+
+For Apple’s developer documentation specifically, our tool replicates sosumi.ai’s strategy: replace Apple’s dynamic pages with static Markdown. Apple’s docs normally require JavaScript (failing if an AI agent uses a simple HTTP GET). However, behind each page there is a JSON data source that can be fetched. Sosumi’s Cloudflare Worker “fetches the original JSON and renders as Markdown” ￼. We will identify the pattern (for example, Apple’s documentation pages often have a content JSON accessible via a specific URL or GraphQL query) and retrieve that JSON on device. Then we format it to Markdown: turning API declarations, paragraphs, and code samples into proper Markdown syntax. This ensures even complex references (protocol conformances, method signatures) are preserved in text form. Any links in the content can be rewritten as Markdown links or plain text. The output might look like an Apple Doc page in README form.
+
+**Example**: If the user asks about Double.init(exactly:), the tool might find the Swift Double documentation. It fetches the JSON for that page, then outputs something like the Markdown that includes the initializer signature, discussion, etc., ready for the LLM to read (no blank “requires JavaScript” issue). This technique unlocks Apple’s docs for AI by exposing the content in a static format.
+
+We also include an Apple Developer site search tool. Sosumi provided an MCP tool to search Apple’s docs ￼, and we’ll do similarly. Likely Apple has a search API or we can simulate a search query via a known URL. The search results (titles and URLs) can be parsed from JSON or HTML, then used to decide which page to fetch. This two-step (search then fetch) will be encapsulated for the AppleDocs tool.
+
+## Foundation Model Tool Integration
+
+We wrap the above logic in a Foundation Models Tool so that Apple’s on-device LLM (available in iOS 26+ as SystemLanguageModel) can use it. The Tool will be a Swift struct or class conforming to the Tool protocol from Apple’s FoundationModels framework ￼. Key aspects of this integration:
+
+* Tool Definition: We create (for example) an AppleDocsTool with a unique name (e.g. "appleDocsSearch") and a brief description explaining its capability (“Searches Apple Developer Documentation and returns results in Markdown format”). According to Apple’s design, tools have a name, description, and a call function ￼. This metadata helps the LLM decide when to use the tool. We may also define an input schema for the tool’s arguments – likely a simple string for the query (or a struct with a single query field annotated with @Guide for clarity).
+* Call Method: The core of the tool is the call(arguments:) function (async). This is where we implement the search & fetch logic described above ￼. When the LLM invokes appleDocsSearch, the framework will pass in the generated query string. The call function will then perform the network requests: first query Apple’s search, then retrieve the top result’s content JSON, convert to Markdown, and return it. We use URLSession with async/await for these calls, making call naturally asynchronous. The Foundation Model framework expects call to return a ToolOutput – which can wrap a plain String or structured content ￼. Here we’ll wrap the Markdown string in a ToolOutput (the simplest approach). This output gets injected into the model’s response context automatically by the framework.
+* Tool Registration: We attach the tool to the language model session. For example, we create our LanguageModelSession(tools: [appleDocsTool, ...]). The Foundation Models API allows multiple tools to be registered at once ￼. We could register one tool per content source (AppleDocs, perhaps others like GitHub). The model knows each tool by its name and can autonomously decide to call them when appropriate. We can reinforce usage via the system prompt/instructions: e.g. “If the user’s question is about Apple APIs, use the appleDocsSearch tool to find the answer”. Apple’s WWDC guidance suggests giving the model clear instructions and even examples of tool usage to ensure it calls the tool at the right time ￼.
+* Tool Execution Flow: At runtime, when the Foundation LLM receives a user question (say, “How do I use AVAudioEngine?”), it will see the AppleDocs tool in its toolbox. If our instructions or the model’s training indicate that documentation is needed, it may respond (internally) with an action to call appleDocsSearch with the query "AVAudioEngine usage". The framework then invokes our call method. The tool fetches the relevant doc (e.g. AVAudioEngine overview), returns markdown text about it. The LLM then continues its generation, now with the content of that doc available. The final answer to the user can be formulated using information from the documentation grounded in that source. In essence, “Tool-calling allows the model to fetch up-to-date info and ground its responses in sources of truth” ￼ – here the “source of truth” is official Apple documentation.
+* Example Tool Implementation (Pseudo-code):
+
+```swift
+struct AppleDocsTool: Tool {
+    let name = "appleDocsSearch"
+    let description = "Search Apple Developer Docs and return the top result in markdown."
+    struct Input: Codable { let query: String }  // Input schema (if needed)
+    func call(arguments: Input) async throws -> ToolOutput {
+        let results = try await appleSearchAPI(query: arguments.query)
+        guard let top = results.first else {
+            return .output("No results found for query.") 
+        }
+        let docContent = try await fetchAppleDocPage(url: top.url)
+        let markdown = convertToMarkdown(docContent)
+        return .output(markdown) 
+    }
+}
+```
+
+In practice we might use `@Generable` on the Input for the model to generate it easily, but a simple string could suffice. The output is returned via .output(string) which the Foundation framework merges into the model’s response ￼. (If needed, ToolOutput could also hold structured data for the model to interpret, but here plain text is fine.)
+
+## Extending to Other Websites and Repositories
+
+The architecture is designed to be extensible. We can create additional Tool classes or modules for other content sources, following the same pattern:
+
+- **Real Content Sites**: For documentation websites (e.g. MDN Web Docs, Python docs, etc.), we implement a similar “Search & Fetch” tool. We use the site’s official search endpoint or API (to avoid illegal scraping) and then retrieve the page content. Some sites may not have a neat JSON data source like Apple’s; in those cases, the tool might fetch the HTML and use an HTML-to-text or HTML-to-Markdown converter. The output still would be a cleaned text snippet. If a site requires JavaScript for content (like some knowledge bases), a more advanced approach could be needed (e.g. a headless browser or an API if provided) ￼. But in general, many documentation sites have printable versions or underlying APIs we can leverage. Each such site tool would have its own name and description so the LLM knows when to use it (for example, a “MDNTool” for web tech queries).
+- **Code-based Repositories**: For selected GitHub repos or codebases, we can similarly integrate a tool. If the repos are small or known, one strategy is to embed them as local data (e.g. bundle a documentation JSON or use DocC for those libraries). However, since the requirement is “same procedure, no crawling”, we likely use GitHub’s search as an external service. For instance, a GitHubRepoTool might call the GitHub Code Search API (with the repo name and query) to find relevant code or README content. It then fetches the raw file from GitHub (e.g. via raw.githubusercontent.com for a specific file path) and returns the snippet. Alternatively, if privacy is paramount and the repos are the developer’s own, they could be mirrored on-device and a local text search performed – but that requires maintaining an index. In our design, using GitHub’s API is simpler: the user’s query goes to GitHub’s servers (authenticated if needed), and the relevant snippet comes back. This is still privacy-conscious in the sense that no third-party AI service sees the query – only GitHub’s servers do, which is expected if searching code on GitHub.
+- **Unified Interface**: We can abstract common logic via a protocol, e.g. DocumentationSource { func search(query) -> [Result]; func fetch(result) -> String }. AppleDocsSource, GitHubSource, etc., would conform. The Tool’s call method can then be generic if we pass in which source to use. However, it might be clearer to simply have separate Tools for each content source and let the model choose. Apple’s framework supports multiple tools concurrently ￼, and the model can decide (based on tool descriptions and context) whether to call, say, “AppleDocsTool” vs “GitHubTool”. For instance, if the user asks about UIKit or Swift, the model should use AppleDocsTool; if they ask about a specific GitHub project or some code snippet, the model uses GitHubTool.
+- **API Design**: Each tool will expose a function (like call) internally, but we also consider providing a higher-level API for the SwiftUI app or other components to use the search directly (bypassing the LLM, if needed for a manual UI search feature). For example, a public method searchAppleDocs(query: String) async -> String can be part of our library for debugging or direct user browsing of docs. However, when used as an LLM tool, the call method is the entry point.
+
+By encapsulating site-specific details in each module, adding support for a new site is just implementing another Tool or extending the search adaptors. This architecture could be replicated for internal company wikis, StackOverflow (if an API exists), etc., ensuring each data source is handled in compliance with its usage policies.
+
+## Privacy and Performance Considerations
+
+**Privacy**: All language model inference runs locally on device – Apple’s Foundation Model is embedded and doesn’t send data to servers ￼. The only network calls are the search and fetch requests to the target documentation sites (Apple, GitHub, etc.), done directly from the user’s device. There’s no third-party mediator collecting queries (unlike using an external search API or LLM). This means the user’s queries remain as private as any normal documentation lookup. Apple’s on-device model ensures queries and context never leave the device during generation. Thus, by design, we align with Apple’s privacy ethos: “All of this runs on-device, so your users’ data can stay private. The model is offline, already embedded in the OS.” ￼. Each external site request is also constrained to exactly what’s needed (e.g. one page fetch), minimizing data exposure. We also avoid storing any fetched content beyond caching for performance; no long-term logs of queries or responses are sent out.
+
+**Non-Blocking UI**: The SwiftUI app using this library will call our search tool asynchronously. We use Swift’s concurrency (structured concurrency with Task or async functions) to perform network calls off the main thread. For example, the call method and any public searchXYZ methods are marked async and internally use await URLSession.data(from:) (which is non-blocking). This means the UI can show a loading spinner or remain interactive while the search and retrieval happen in the background. Once the content is ready (or if the model finishes using the tool), results can be displayed or used to form the answer. We ensure that heavy parsing (like Markdown conversion or JSON parsing) is done on background threads (Swift concurrency can hop threads for these tasks). The architecture might use Combine or Swift’s Task.detached if needed to further offload work from the main actor. By keeping the tool work asynchronous, we prevent any jank in a SwiftUI interface that’s awaiting an answer.
+
+**Streaming and Perceived Performance**: To improve perceived performance, we can employ streaming where possible. Apple’s foundation framework allows streaming token-by-token responses from the model ￼. Our tool can contribute by, say, returning partial data if feasible. For instance, if the doc content is very large, we might stream chunks (though typically we’ll wait for the full Markdown before returning it). More practically, we will let the LLM start streaming its final answer to the UI as soon as it has some content, rather than waiting for a fully formed answer. The overall flow: the user question triggers the model; the model quickly decides to use the tool; while the tool fetches data the UI can show a “Searching docs…” indicator; once data is fetched, the model composes the answer and streams it out. This keeps the app responsive and the user informed.
+
+**Caching & Rate Limits**: To boost performance for repeated queries, the architecture can include an in-memory cache for fetched pages. For example, if the same Apple doc page is requested multiple times, we can store its Markdown so we don’t fetch it again within a session. This is an implementation detail but can significantly cut latency on popular queries. Also, hitting external search APIs repeatedly could trigger rate limits; caching results for a short time or queuing requests responsibly will mitigate this.
+
+**Scalability**: Each tool invocation is isolated and lightweight – one search query, one page fetch. The Foundation Models framework handles sequencing if multiple tools calls were needed in a single conversation (it can manage parallel or serial calls automatically ￼). The design does not spawn long-lived threads or heavy processes, it leans on high-level async calls. This ensures even if the SwiftUI app fires multiple queries (or the LLM calls the tool multiple times in an agent loop), the system can handle them concurrently.
+
+**Error Handling**: We also design the tool to handle failures gracefully. If a site is unreachable or returns no results, the tool can return a friendly message or an empty result that the model can interpret (“No documentation found for that query”). This way the user isn’t left waiting indefinitely. The UI can also listen for errors (e.g. network timeouts) and prompt the user accordingly.
+
+Overall, this architecture provides a comprehensive, extensible solution for retrieval-augmented AI on Apple platforms. It uses on-device Foundation Models for intelligence and a modular Tool system for connecting to live knowledge sources. By converting content to Markdown and leveraging Apple’s Tool API, the solution ensures the LLM always works with high-quality reference text and can cite the latest official info ￼ ￼. The result is a local “AI doc assistant” that can answer questions about Apple frameworks (and beyond) with accuracy and privacy, integrated seamlessly into any SwiftUI app.
+
+**Sources**: The approach builds on Mattt’s sosumi.ai for doc conversion ￼ and Apple’s WWDC25 Foundation Models framework which allows custom tool plugins ￼ ￼. By combining these, we achieve a powerful on-device QA system that feels like a natural extension of the Apple developer ecosystem.
