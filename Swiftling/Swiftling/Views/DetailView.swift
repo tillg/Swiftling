@@ -130,8 +130,12 @@ struct DetailView: View {
                         .frame(maxWidth: .infinity, minHeight: 200)
                     } else if let content = documentContent {
                         VStack(alignment: .leading, spacing: 12) {
-                            // Markdown content (stripped of frontmatter and formatted)
-                            FullMarkdownView(markdown: MarkdownUtilities.stripFrontmatter(content.markdown))
+                            // Markdown content (stripped of frontmatter, cleaned up, and formatted)
+                            FullMarkdownView(
+                                markdown: MarkdownUtilities.cleanUpMarkdown(
+                                    MarkdownUtilities.stripFrontmatter(content.markdown)
+                                )
+                            )
 
                             Divider()
 

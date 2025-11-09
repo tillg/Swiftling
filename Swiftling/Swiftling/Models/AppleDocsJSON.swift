@@ -55,51 +55,6 @@ struct AppleDocJSON: Codable, Sendable {
     }
 }
 
-// MARK: - Helper Types
-
-/// Helper type that can decode either a String or [String]
-enum StringOrArray: Codable, Sendable {
-    case string(String)
-    case array([String])
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let string = try? container.decode(String.self) {
-            self = .string(string)
-        } else if let array = try? container.decode([String].self) {
-            self = .array(array)
-        } else {
-            throw DecodingError.typeMismatch(
-                StringOrArray.self,
-                DecodingError.Context(
-                    codingPath: decoder.codingPath,
-                    debugDescription: "Expected String or [String]"
-                )
-            )
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        switch self {
-        case .string(let string):
-            try container.encode(string)
-        case .array(let array):
-            try container.encode(array)
-        }
-    }
-
-    /// Get the string value, joining arrays with newlines
-    var stringValue: String {
-        switch self {
-        case .string(let str):
-            return str
-        case .array(let arr):
-            return arr.joined(separator: "\n")
-        }
-    }
-}
-
 // MARK: - Content Items
 
 /// Represents a documentation content item

@@ -7,22 +7,65 @@
 
 import SwiftUI
 
-/// A view that renders markdown content with proper formatting
+/// A view that renders markdown content with proper formatting using SwiftUI's native Markdown support
 struct MarkdownView: View {
     let markdown: String
 
     var body: some View {
-        if let attributedString = try? AttributedString(markdown: markdown, options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+        // SwiftUI's Text automatically renders Markdown when given a LocalizedStringKey
+        Text(LocalizedStringKey(markdown))
+            .textSelection(.enabled)
+    }
+}
+
+/// Helper view for rendering markdown text blocks with proper formatting
+private struct MarkdownTextView: View {
+    let markdown: String
+
+    var body: some View {
+        // Normalize markdown to ensure proper parsing
+        let normalizedMarkdown = normalizeMarkdown(markdown)
+
+        // Try to parse the markdown as AttributedString
+        if let attributedString = try? AttributedString(markdown: normalizedMarkdown) {
             Text(attributedString)
                 .textSelection(.enabled)
-        } else if let attributedString = try? AttributedString(markdown: markdown) {
-            Text(attributedString)
-                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            // Fallback to plain text if markdown parsing fails
-            Text(markdown)
+            // If parsing fails, show as plain text
+            Text(normalizedMarkdown)
                 .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// Normalizes markdown to ensure headings and other elements are properly formatted
+    private func normalizeMarkdown(_ text: String) -> String {
+        let lines = text.components(separatedBy: .newlines)
+        var result: [String] = []
+        var previousLineWasBlank = true
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            // Check if this line is a heading
+            if trimmed.hasPrefix("#") {
+                // Ensure blank line before heading (unless it's the first line)
+                if !result.isEmpty && !previousLineWasBlank {
+                    result.append("")
+                }
+                result.append(line)
+                previousLineWasBlank = false
+            } else if trimmed.isEmpty {
+                result.append(line)
+                previousLineWasBlank = true
+            } else {
+                result.append(line)
+                previousLineWasBlank = false
+            }
+        }
+
+        return result.joined(separator: "\n")
     }
 }
 
@@ -31,19 +74,12 @@ struct FullMarkdownView: View {
     let markdown: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(parseMarkdownBlocks().enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .text(let content):
-                    if let attributedString = try? AttributedString(markdown: content) {
-                        Text(attributedString)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Text(content)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    // Use SwiftUI's native Markdown rendering for text content
+                    MarkdownTextView(markdown: content)
 
                 case .codeBlock(let code, let language):
                     VStack(alignment: .leading, spacing: 4) {
@@ -102,9 +138,15 @@ struct FullMarkdownView: View {
                     inCodeBlock = false
                 } else {
                     // Start of code block
-                    // Save any accumulated text
+                    // Save any accumulated text (preserve ALL lines including empty ones)
                     if !currentTextLines.isEmpty {
-                        blocks.append(.text(currentTextLines.joined(separator: "\n")))
+                        // Remove trailing empty lines from text block
+                        while currentTextLines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+                            currentTextLines.removeLast()
+                        }
+                        if !currentTextLines.isEmpty {
+                            blocks.append(.text(currentTextLines.joined(separator: "\n")))
+                        }
                         currentTextLines = []
                     }
 
@@ -124,7 +166,13 @@ struct FullMarkdownView: View {
 
         // Add any remaining text
         if !currentTextLines.isEmpty {
-            blocks.append(.text(currentTextLines.joined(separator: "\n")))
+            // Remove trailing empty lines
+            while currentTextLines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+                currentTextLines.removeLast()
+            }
+            if !currentTextLines.isEmpty {
+                blocks.append(.text(currentTextLines.joined(separator: "\n")))
+            }
         }
 
         // Handle unclosed code block
@@ -144,7 +192,13 @@ struct FullMarkdownView: View {
 
         This is **bold** text and this is *italic* text.
 
+        This is ***bold italic*** text.
+
         Here's a [link](https://example.com).
+
+        ~~Strikethrough text~~
+
+        `Inline code works too`
 
         - List item 1
         - List item 2
@@ -168,6 +222,8 @@ struct FullMarkdownView: View {
 
         Arrays are one of the most commonly used data types. Use them when you need an **ordered** collection of values.
 
+        You can also use ***bold italic*** text and ~~strikethrough~~ text.
+
         ## Example
 
         ```swift
@@ -177,7 +233,72 @@ struct FullMarkdownView: View {
         }
         ```
 
-        You can also use ***bold italic*** text.
+        Here's some `inline code` in a paragraph.
+
+        Visit [Apple's website](https://apple.com) for more information.
+        """)
+        .padding()
+    }
+}
+
+#Preview("Apple Callouts") {
+    ScrollView {
+        FullMarkdownView(markdown: MarkdownUtilities.cleanUpMarkdown("""
+        # Array Documentation
+
+        Arrays store values of the same type in an ordered list.
+
+        > [!NOTE]
+        > The ContiguousArray and ArraySlice types are not bridged; instances of those types always have a contiguous block of memory as their storage.
+
+        ## Performance
+
+        Arrays are optimized for performance.
+
+        > [!WARNING]
+        > Modifying an array while iterating over it may cause undefined behavior.
+
+        > [!TIP]
+        > Use `reserveCapacity(_:)` to improve performance when you know the approximate size.
+
+        ## Thread Safety
+
+        > [!IMPORTANT]
+        > Arrays are not thread-safe. Use appropriate synchronization when accessing arrays from multiple threads.
+
+        Regular text continues here.
+        """))
+        .padding()
+    }
+}
+
+#Preview("Heading Test") {
+    ScrollView {
+        FullMarkdownView(markdown: """
+        # Heading 1
+
+        This is some text under heading 1.
+
+        ## Heading 2
+
+        This is some text under heading 2. It should have **bold** and *italic* text.
+
+        ### Heading 3
+
+        - List item 1
+        - List item 2
+        - List item 3
+
+        ## Another Heading 2
+
+        ```swift
+        let array = [1, 2, 3]
+        print(array)
+        ```
+
+        ## Final Heading
+
+        Regular text with `inline code` and a [link](https://apple.com).
         """)
         .padding()
     }
