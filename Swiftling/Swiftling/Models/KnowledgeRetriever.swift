@@ -57,7 +57,7 @@ extension KnowledgeRetriever {
 // MARK: - Data Models
 
 /// Represents a single search result from a documentation source
-struct SearchResult: Sendable, Identifiable {
+struct SearchResult: Sendable, Identifiable, Hashable {
     /// Unique identifier for this result
     let id: UUID
 
