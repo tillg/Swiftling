@@ -86,6 +86,74 @@ New content sources can be added by:
 
 Consider using a shared `DocumentationSource` protocol for common search/fetch patterns across tools.
 
+## UI Architecture
+
+### Navigation Pattern: NavigationSplitView with Environment-Based State
+
+The app uses modern SwiftUI navigation patterns (iOS 16+) with the following architecture:
+
+**Three-Column Layout:**
+1. **Sidebar**: Knowledge source selection and search interface
+2. **Results List**: Search results displayed as cards
+3. **Detail View**: Full documentation content with metadata
+
+**State Management:**
+- Centralized `AppState` class marked `@Observable` (iOS 17+)
+- Single source of truth for: search query, results, selected result, enabled sources
+- No prop drilling - state injected via `@Environment(AppState.self)`
+
+**Key Implementation Pattern:**
+
+```swift
+@Observable
+class AppState {
+    var enabledSources: Set<String> = ["apple-docs"]
+    var currentQuery: String = ""
+    var searchResults: [SearchResult] = []
+    var selectedResult: SearchResult?
+    var isSearching: Bool = false
+    var searchError: Error?
+
+    func performSearch(query: String) async {
+        // Search logic using KnowledgeRetriever
+    }
+}
+
+struct ContentView: View {
+    @State private var appState = AppState()
+
+    var body: some View {
+        NavigationSplitView {
+            SidebarView()
+                .environment(appState)
+        } content: {
+            ResultsListView()
+                .environment(appState)
+        } detail: {
+            if let result = appState.selectedResult {
+                DetailView(result: result)
+                    .environment(appState)
+            }
+        }
+    }
+}
+```
+
+**Navigation Principles:**
+- Use NavigationSplitView for multi-column layouts (not NavigationStack)
+- Selection-based navigation via `selection:` binding (not path-based)
+- All views access state via `@Environment` (no manual passing)
+- `SearchResult` conforms to `Identifiable`, `Hashable`, and `Sendable`
+- Platform adaptivity: Three columns on iPad/Mac, collapses to stack on iPhone
+
+**UI States:**
+- Loading state: Show progress indicator during search
+- Error state: Display error with retry button
+- Empty state: Show placeholder when no results
+- Success state: Display result cards with breadcrumbs, tags, type badges
+
+See `BASIC_UI.md` for detailed UI specifications and `SWIFTUI_NAVIGATION_BEST_PRACTICES.md` for navigation patterns.
+
 ## Development Context
 
 - **Language**: Swift 6
@@ -106,4 +174,30 @@ Consider using a shared `DocumentationSource` protocol for common search/fetch p
 
 ## Current Status
 
-Project is in initial planning/setup phase with basic SwiftUI app structure. The detailed architecture document (KNOWLEDGERETRIEVER.md) outlines the complete implementation plan for the KnowledgeRetriever search-and-retrieval system.
+**Completed:**
+- ✅ KnowledgeRetriever protocol and architecture (see `KNOWLEDGE_RETRIEVER.md`)
+- ✅ Apple Developer Documentation retriever implementation
+  - HTML search result parsing with breadcrumbs, tags, and result types
+  - JSON-to-Markdown conversion for documentation pages
+  - In-memory caching system
+  - Xcode playground tests for validation
+- ✅ UI architecture specification (see `BASIC_UI.md`)
+  - Three-column NavigationSplitView layout
+  - Modern navigation patterns following iOS 16+ best practices
+  - AppState-based state management with environment injection
+  - Detailed mockups and implementation examples
+
+**In Progress:**
+- SwiftUI UI implementation
+  - SidebarView (knowledge source selection + search)
+  - ResultsListView (search results with cards)
+  - DetailView (documentation content + metadata)
+- AppState integration with KnowledgeRetriever
+
+**Not Started:**
+- Foundation Models integration for LLM-powered answers
+- Tool protocol implementation for LLM integration
+- HackingWithSwift knowledge retriever
+- GitHub repositories knowledge retriever
+- Deep linking support
+- State restoration and search history
