@@ -32,8 +32,16 @@ actor HWSKnowledgeRetriever: KnowledgeRetriever {
     // MARK: - Search
 
     func search(query: String, maxResults: Int = 0) async throws -> [SearchResult] {
-        // URL encode the query
-        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+        // Sanitize query to match HackingWithSwift's behavior
+        let sanitizedQuery = sanitizeQueryForHWS(query)
+
+        // Log sanitization if query was changed
+        if sanitizedQuery != query {
+            print("HWS Query Sanitization: '\(query)' → '\(sanitizedQuery)'")
+        }
+
+        // URL encode the sanitized query
+        guard let encodedQuery = sanitizedQuery.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw KnowledgeRetrieverError.invalidRequest(description: "Could not encode query")
         }
 
@@ -130,5 +138,29 @@ actor HWSKnowledgeRetriever: KnowledgeRetriever {
     /// Get current cache size
     func cacheSize() -> Int {
         cache.count
+    }
+
+    // MARK: - Query Sanitization
+
+    /// Sanitize query to match HackingWithSwift's behavior
+    /// HWS removes or truncates certain special characters:
+    /// - `?` truncates the query at that position
+    /// - `&` is removed
+    /// - `!` and `$` are kept
+    private func sanitizeQueryForHWS(_ query: String) -> String {
+        var result = query
+
+        // If query contains `?`, truncate at that position
+        if let questionMarkIndex = result.firstIndex(of: "?") {
+            result = String(result[..<questionMarkIndex])
+        }
+
+        // Remove `&` characters
+        result = result.replacingOccurrences(of: "&", with: "")
+
+        // Trim whitespace
+        result = result.trimmingCharacters(in: .whitespaces)
+
+        return result
     }
 }

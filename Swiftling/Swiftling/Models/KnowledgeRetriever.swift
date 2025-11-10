@@ -88,6 +88,17 @@ struct SearchResult: Sendable, Identifiable, Hashable {
     /// Additional metadata (e.g., API type, language, version)
     let metadata: [String: String]
 
+    // MARK: - Reranking Metadata
+
+    /// Original position in search results (0-based, set during search)
+    var originalPosition: Int?
+
+    /// Position after AI reranking (0-based)
+    var rerankedPosition: Int?
+
+    /// Confidence score from reranker (0.0 to 1.0)
+    var rerankScore: Double?
+
     nonisolated init(
         id: UUID = UUID(),
         title: String,
@@ -98,7 +109,10 @@ struct SearchResult: Sendable, Identifiable, Hashable {
         tags: [String] = [],
         resultType: String? = nil,
         relevanceScore: Double? = nil,
-        metadata: [String: String] = [:]
+        metadata: [String: String] = [:],
+        originalPosition: Int? = nil,
+        rerankedPosition: Int? = nil,
+        rerankScore: Double? = nil
     ) {
         self.id = id
         self.title = title
@@ -110,6 +124,22 @@ struct SearchResult: Sendable, Identifiable, Hashable {
         self.resultType = resultType
         self.relevanceScore = relevanceScore
         self.metadata = metadata
+        self.originalPosition = originalPosition
+        self.rerankedPosition = rerankedPosition
+        self.rerankScore = rerankScore
+    }
+
+    /// Returns true if this result has been reranked
+    var isReranked: Bool {
+        rerankedPosition != nil
+    }
+
+    /// Returns the movement delta (positive = moved up, negative = moved down, 0 = no change)
+    var movementDelta: Int? {
+        guard let original = originalPosition, let reranked = rerankedPosition else {
+            return nil
+        }
+        return original - reranked // Positive means moved up (lower index)
     }
 }
 

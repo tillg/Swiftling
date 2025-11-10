@@ -44,11 +44,120 @@ struct ResultsListView: View {
     private var resultsList: some View {
         @Bindable var appState = appState
 
-        return List(appState.searchResults, selection: $appState.selectedResult) { result in
-            ResultCardView(result: result)
-                .tag(result)
+        return VStack(spacing: 0) {
+            // Rerank button
+            rerankButton
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
+            // Partial failure warnings
+            if !appState.sourceErrors.isEmpty {
+                sourceWarnings
+            }
+
+            // Results list
+            List(appState.searchResults, selection: $appState.selectedResult) { result in
+                ResultCardView(result: result)
+                    .tag(result)
+            }
+            .listStyle(.plain)
         }
-        .listStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var sourceWarnings: some View {
+        VStack(spacing: 8) {
+            ForEach(Array(appState.sourceErrors.keys.sorted()), id: \.self) { source in
+                if let error = appState.sourceErrors[source] {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(sourceDisplayName(source))
+                                .font(.caption)
+                                .fontWeight(.medium)
+
+                            Text(errorMessage(error))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.orange.opacity(0.1))
+                    .cornerRadius(6)
+                }
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func sourceDisplayName(_ identifier: String) -> String {
+        switch identifier {
+        case "apple-docs":
+            return "Apple Developer Documentation"
+        case "hackingwithswift":
+            return "Hacking with Swift"
+        case "github":
+            return "GitHub"
+        default:
+            return identifier.replacingOccurrences(of: "-", with: " ").capitalized
+        }
+    }
+
+    private func errorMessage(_ error: Error) -> String {
+        if let retrieverError = error as? KnowledgeRetrieverError {
+            switch retrieverError {
+            case .noResults:
+                return "No results found"
+            case .networkError:
+                return "Network error"
+            case .parsingError:
+                return "Failed to parse results"
+            default:
+                return error.localizedDescription
+            }
+        }
+        return error.localizedDescription
+    }
+
+    private var rerankButton: some View {
+        Button(action: {
+            Task {
+                await appState.performRerank()
+            }
+        }) {
+            HStack(spacing: 8) {
+                switch appState.rerankButtonState {
+                case .ready:
+                    Image(systemName: "sparkles")
+                    Text("Rerank with AI")
+
+                case .reranking:
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Reranking...")
+
+                case .completed:
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Reranked")
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(appState.searchResults.isEmpty || appState.rerankButtonState != .ready)
+        .animation(.easeInOut, value: appState.rerankButtonState)
     }
 
     private var sourceNames: String {
@@ -65,10 +174,19 @@ struct ResultCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Title
-            Text(result.title)
-                .font(.headline)
-                .lineLimit(2)
+            // Title with movement indicator
+            HStack {
+                Text(result.title)
+                    .font(.headline)
+                    .lineLimit(2)
+
+                Spacer()
+
+                // Movement indicator
+                if let delta = result.movementDelta {
+                    movementIndicator(delta: delta)
+                }
+            }
 
             // Summary
             if let summary = result.summary, !summary.isEmpty {
@@ -94,6 +212,20 @@ struct ResultCardView: View {
 
             // Metadata row
             HStack(spacing: 8) {
+                // AI Reranked badge
+                if result.isReranked {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles")
+                        Text("AI Reranked")
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.purple.opacity(0.1))
+                    .foregroundStyle(.purple)
+                    .cornerRadius(4)
+                }
+
                 // Source badge
                 Label(result.sourceIdentifier.replacingOccurrences(of: "-", with: " ").capitalized,
                       systemImage: sourceIcon(for: result.sourceIdentifier))
@@ -147,6 +279,30 @@ struct ResultCardView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func movementIndicator(delta: Int) -> some View {
+        if delta > 0 {
+            // Moved up
+            let arrows = delta >= 3 ? "↑↑" : "↑"
+            Text(arrows)
+                .font(.caption)
+                .foregroundStyle(.green)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(.green.opacity(0.1))
+                .cornerRadius(3)
+        } else if delta < 0 {
+            // Moved down
+            Text("↓")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(.orange.opacity(0.1))
+                .cornerRadius(3)
+        }
     }
 
     private func sourceIcon(for source: String) -> String {

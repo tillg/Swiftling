@@ -198,11 +198,19 @@ See `BASIC_UI.md` for detailed UI specifications and `SWIFTUI_NAVIGATION_BEST_PR
   - Modern navigation patterns following iOS 16+ best practices
   - AppState-based state management with environment injection
   - Detailed mockups and implementation examples
+- ✅ AI-powered search result reranker (see `RERANKER.md`)
+  - Token-aware reranking with configurable limits (20 results, 6000 tokens)
+  - Smart query sanitization for HackingWithSwift (handles ?, &, etc.)
+  - Visual indicators: movement arrows (↑↑, ↑, ↓), "AI Reranked" badges
+  - Three-state button UI: ready → reranking → completed
+  - Partial failure handling: shows results from successful sources with warnings
+  - Caching system to avoid re-ranking same queries
+  - Ready for Foundation Models integration (currently using mock keyword-based ranker)
 
 **In Progress:**
 - SwiftUI UI implementation
   - SidebarView (knowledge source selection + search)
-  - ResultsListView (search results with cards)
+  - ResultsListView (search results with cards + reranking)
   - DetailView (documentation content + metadata)
 - AppState integration with KnowledgeRetriever
 

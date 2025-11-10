@@ -9,18 +9,9 @@ import Foundation
 
 /// Cleans up markdown content from HackingWithSwift by removing navigation, promotional content, and UI elements
 /// Based on https://github.com/tillg/site2chunks/blob/main/config/hackingwithswift/config.yaml
-///
-/// Note: This is now a wrapper around HWSMarkdownCleanerV2 for backwards compatibility
 struct HWSMarkdownCleaner {
-    private let cleaner = HWSMarkdownCleanerV2()
-
     /// Cleans the provided markdown by applying all cleanup rules in order
     func clean(_ markdown: String) -> String {
-        return cleaner.clean(markdown)
-    }
-
-    /// Old implementation (kept for reference)
-    private func cleanOld(_ markdown: String) -> String {
         var result = markdown
 
         // Apply all rules in order: structural rules first, then content rules, then cleanup rules
