@@ -157,4 +157,43 @@ enum MarkdownUtilities {
             return type.prefix(1).uppercased() + type.dropFirst().lowercased()
         }
     }
+
+    /// Ensures markdown has proper spacing for Apple's Text view to render correctly
+    /// Apple's Text requires blank lines between paragraphs and before headings
+    /// - Parameter markdown: The markdown string
+    /// - Returns: Markdown with proper spacing
+    static func ensureProperSpacing(_ markdown: String) -> String {
+        let lines = markdown.components(separatedBy: .newlines)
+        var result: [String] = []
+        var previousLineWasBlank = false
+
+        for (index, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            // Check if this is a heading
+            if trimmed.hasPrefix("#") {
+                // Ensure blank line before heading (unless it's the first line or previous was already blank)
+                if index > 0 && !previousLineWasBlank && !result.isEmpty {
+                    result.append("")
+                }
+                result.append(line)
+                previousLineWasBlank = false
+            }
+            // Check if line is blank
+            else if trimmed.isEmpty {
+                // Only add blank line if previous wasn't blank (avoid multiple consecutive blanks)
+                if !previousLineWasBlank {
+                    result.append("")
+                    previousLineWasBlank = true
+                }
+            }
+            // Regular content line
+            else {
+                result.append(line)
+                previousLineWasBlank = false
+            }
+        }
+
+        return result.joined(separator: "\n")
+    }
 }

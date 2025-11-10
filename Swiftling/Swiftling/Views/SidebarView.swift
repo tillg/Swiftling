@@ -18,9 +18,7 @@ struct SidebarView: View {
             Section("Knowledge Sources") {
                 Toggle("Apple Developer Docs", isOn: binding(for: "apple-docs"))
 
-                Toggle("HackingWithSwift", isOn: .constant(false))
-                    .disabled(true)
-                    .foregroundStyle(.secondary)
+                Toggle("HackingWithSwift", isOn: binding(for: "hackingwithswift"))
 
                 Toggle("GitHub Repositories", isOn: .constant(false))
                     .disabled(true)

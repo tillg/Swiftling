@@ -160,7 +160,9 @@ See `BASIC_UI.md` for detailed UI specifications and `SWIFTUI_NAVIGATION_BEST_PR
 - **UI Framework**: SwiftUI
 - **Concurrency**: Structured concurrency with async/await
 - **Target Platforms**: iOS 26+, macOS (requires Foundation Models framework)
-- **Key Dependencies**: Apple's Foundation Models framework for on-device LLM and Tool support
+- **Key Dependencies**:
+  - Apple's Foundation Models framework for on-device LLM and Tool support
+  - [MarkdownUI](https://github.com/gonzalezreal/swift-markdown-ui) for GitHub-flavored Markdown rendering
 
 ## Key Implementation Notes
 
@@ -181,6 +183,16 @@ See `BASIC_UI.md` for detailed UI specifications and `SWIFTUI_NAVIGATION_BEST_PR
   - JSON-to-Markdown conversion for documentation pages
   - In-memory caching system
   - Xcode playground tests for validation
+- ✅ HackingWithSwift knowledge retriever implementation (see `HWS_KNOWLEDGE_RETRIEVER.md`)
+  - Search result parsing with metadata extraction
+  - Content fetching and cleaning
+  - Markdown content sanitization (removes navigation, ads, promotional content)
+  - Comprehensive test suite with 58+ cleaning rules
+  - Xcode playground tests for validation
+- ✅ Markdown rendering system
+  - Integrated MarkdownUI library for full GitHub-flavored Markdown support
+  - Supports headings, code blocks with syntax highlighting, lists, tables, links, images
+  - Text selection enabled for all content
 - ✅ UI architecture specification (see `BASIC_UI.md`)
   - Three-column NavigationSplitView layout
   - Modern navigation patterns following iOS 16+ best practices
@@ -197,7 +209,6 @@ See `BASIC_UI.md` for detailed UI specifications and `SWIFTUI_NAVIGATION_BEST_PR
 **Not Started:**
 - Foundation Models integration for LLM-powered answers
 - Tool protocol implementation for LLM integration
-- HackingWithSwift knowledge retriever
 - GitHub repositories knowledge retriever
 - Deep linking support
 - State restoration and search history

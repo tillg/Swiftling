@@ -16,8 +16,8 @@ import SwiftUI
 class AppState {
     // MARK: - Search State
 
-    /// Set of enabled knowledge sources (e.g., "apple-docs")
-    var enabledSources: Set<String> = ["apple-docs"]
+    /// Set of enabled knowledge sources (e.g., "apple-docs", "hackingwithswift")
+    var enabledSources: Set<String> = ["apple-docs", "hackingwithswift"]
 
     /// Current search query string
     var currentQuery: String = ""
@@ -62,7 +62,13 @@ class AppState {
                 allResults.append(contentsOf: results)
             }
 
-            // TODO: Add other retrievers (HackingWithSwift, GitHub) when implemented
+            if enabledSources.contains("hackingwithswift") {
+                let retriever = HWSKnowledgeRetriever()
+                let results = try await retriever.search(query: query, maxResults: 10)
+                allResults.append(contentsOf: results)
+            }
+
+            // TODO: Add GitHub retriever when implemented
 
             // Update results
             self.searchResults = allResults

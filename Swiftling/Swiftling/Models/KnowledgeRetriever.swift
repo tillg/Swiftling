@@ -88,7 +88,7 @@ struct SearchResult: Sendable, Identifiable, Hashable {
     /// Additional metadata (e.g., API type, language, version)
     let metadata: [String: String]
 
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         title: String,
         summary: String? = nil,
@@ -127,7 +127,7 @@ struct DocumentContent: Sendable {
     /// Optional raw data (for caching/debugging)
     let rawData: Data?
 
-    init(
+    nonisolated init(
         searchResult: SearchResult,
         markdown: String,
         fetchedAt: Date = Date(),

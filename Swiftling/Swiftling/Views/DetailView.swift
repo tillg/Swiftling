@@ -14,6 +14,7 @@ struct DetailView: View {
     @State private var documentContent: DocumentContent?
     @State private var isLoading: Bool = true
     @State private var loadError: Error?
+    @State private var showRawMarkdown: Bool = false
 
     var body: some View {
         ScrollView {
@@ -130,12 +131,47 @@ struct DetailView: View {
                         .frame(maxWidth: .infinity, minHeight: 200)
                     } else if let content = documentContent {
                         VStack(alignment: .leading, spacing: 12) {
-                            // Markdown content (stripped of frontmatter, cleaned up, and formatted)
-                            FullMarkdownView(
-                                markdown: MarkdownUtilities.cleanUpMarkdown(
-                                    MarkdownUtilities.stripFrontmatter(content.markdown)
+                            // View mode toggle
+                            HStack {
+                                Spacer()
+                                Picker("View Mode", selection: $showRawMarkdown) {
+                                    Label("Formatted", systemImage: "doc.richtext")
+                                        .tag(false)
+                                    Label("Raw Markdown", systemImage: "doc.plaintext")
+                                        .tag(true)
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(maxWidth: 250)
+                            }
+                            .padding(.bottom, 8)
+
+                            // Markdown content
+                            if showRawMarkdown {
+                                // Raw markdown view
+                                ScrollView(.horizontal, showsIndicators: true) {
+                                    Text(MarkdownUtilities.stripFrontmatter(content.markdown))
+                                        .font(.system(.body, design: .monospaced))
+                                        .textSelection(.enabled)
+                                        .padding()
+                                }
+                                #if os(iOS)
+                                .background(Color(uiColor: .secondarySystemBackground))
+                                #else
+                                .background(Color(nsColor: .textBackgroundColor))
+                                #endif
+                                .cornerRadius(8)
+                            } else {
+                                // Formatted markdown view
+                                // 1. Strip frontmatter
+                                // 2. Clean up Apple callouts
+                                // 3. Ensure proper spacing for Apple's Text rendering
+                                let processedMarkdown = MarkdownUtilities.ensureProperSpacing(
+                                    MarkdownUtilities.cleanUpMarkdown(
+                                        MarkdownUtilities.stripFrontmatter(content.markdown)
+                                    )
                                 )
-                            )
+                                FullMarkdownView(markdown: processedMarkdown)
+                            }
 
                             Divider()
 
@@ -216,7 +252,9 @@ struct DetailView: View {
         switch sourceIdentifier {
         case "apple-docs":
             return AppleDocsRetriever()
-        // TODO: Add other retrievers when implemented
+        case "hackingwithswift":
+            return HWSKnowledgeRetriever()
+        // TODO: Add GitHub retriever when implemented
         default:
             return AppleDocsRetriever()
         }
